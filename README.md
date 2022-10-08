@@ -1,5 +1,5 @@
-# Minio & Monk
-This repository contains Monk.io template to deploy Minio Cluster either locally or on cloud of your choice (AWS, GCP, Azure, Digital Ocean).
+# Apache Airflow & Monk
+This repository contains Monk.io template to deploy Apache Airflow either locally or on cloud of your choice (AWS, GCP, Azure, Digital Ocean).
 
 # Prerequisites
 - [Install Monk](https://docs.monk.io/docs/get-monk)
