@@ -1,0 +1,34 @@
+namespace: monk-airflow
+
+stack:
+  defines: process-group
+  runnable-list:
+    - monk-airflow/airflow-redis
+    - monk-airflow/airflow-db
+    - monk-airflow/airflow-webserver
+    - monk-airflow/airflow-scheduler
+    - monk-airflow/airflow-worker
+    - monk-airflow/airflow-triggerer
+    - monk-airflow/airflow-init
+  variables:
+    database_name:
+      type: string
+      value: airflow
+    database_password:
+      type: string
+      value: airflow
+    database_user:
+      type: string
+      value: airflow
+    database_port:
+      type: int
+      value: 5432
+    airflow_username:
+      type: string
+      value: airflow
+    airflow_password:
+      type: string
+      value: airflow
+    webserver_port:
+      type: int
+      value: 8080

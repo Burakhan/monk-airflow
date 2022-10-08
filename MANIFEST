@@ -1,0 +1,3 @@
+REPO apache-airflow
+LOAD airflow.yml stack.yml
+RESOURCES init.sh

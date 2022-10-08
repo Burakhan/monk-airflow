@@ -1,0 +1,238 @@
+namespace: monk-airflow
+
+
+airflow-common:
+  variables:
+    database_host:
+      type: string
+      value: <- get-hostname("monk-airflow/airflow-db", "postgres") split(".dns.podman") join("")
+    redis_host:
+      type: string
+      value: <- get-hostname("monk-airflow/airflow-redis", "monk-airflow-redis") split(".dns.podman") join("")
+    airflow_core_executor:
+      env: AIRFLOW__CORE__EXECUTOR
+      type: string
+      value: CeleryExecutor
+    airflow_database_sql_alchemy_conn:
+      env: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+      type: string
+      value: <- `postgresql+psycopg2://${database_user}:${database_password}@${database_host}/${database_name}`
+    # airflow_database_sql_alchemy_conn_legacy:
+    #   env: AIRFLOW__CORE__SQL_ALCHEMY_CONN
+    #   type: string
+    #   value: <- `postgresql+psycopg2://${database_user}:${database_password}@${database_host}/${database_name}`
+    airflow_celery_result_backend:
+      env: AIRFLOW__CELERY__RESULT_BACKEND
+      type: string
+      value: <- `db+postgresql://${database_user}:${database_password}@${database_host}/${database_name}`
+    airflow_celery_broker_url:
+      env: AIRFLOW__CELERY__BROKER_URL
+      type: string
+      value: <- `redis://:@${redis_host}:6379/0`
+    airflow_core_fernet_key:
+      env: AIRFLOW__CORE__FERNET_KEY
+      type: string
+      value: ''
+    airflow_core_dags_are_paused_at_creation:
+      env: AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION
+      type: string
+      value: true
+    airflow_core_load_examples:
+      env: AIRFLOW__CORE__LOAD_EXAMPLES
+      type: string
+      value: true
+    airflow_api_auth_backends:
+      env: AIRFLOW__API__AUTH_BACKENDS
+      type: string
+      value: airflow.api.auth.backend.basic_auth
+    airflow_pip_additional_requirements:
+      env: _PIP_ADDITIONAL_REQUIREMENTS
+      type: string
+      value: airflow.api.auth.backend.basic_auth
+    webserver_port:
+      env: WEB_SERVER_PORT
+      type: int
+      value: <- `${webserver_port}`
+    volume_local:
+      type: string
+      value: <- `${monk-volume-path}/monk-airflow`
+    airflow_uuid:
+      env: AIRFLOW_UUID
+      type: string
+      value: 50000
+  depends:
+    wait-for:
+      runnables:
+        - monk-airflow/airflow-redis
+        - monk-airflow/airflow-db
+
+airflow-redis:
+  defines: runnable
+  containers:
+    monk-airflow-redis:
+      image: redis:latest
+
+
+airflow-db: 
+  defines: runnable
+  variables:
+    defines: variables
+    image-tag:
+      type: string
+      value: latest
+    db-password:
+      env: POSTGRES_PASSWORD
+      value: <- `${database_password}`
+      type: string
+    db-user:
+      env: POSTGRES_USER
+      value: <- `${database_user}`
+      type: string
+    db-name:
+      env: POSTGRES_DB
+      value: <- `${database_name}`
+      type: string
+    db-port:
+      value: <- `${database_port}`
+      type: int
+    db-trust:
+      env: POSTGRES_HOST_AUTH_METHOD
+      value: trust
+  containers:
+    defines: containers
+    postgres:
+      image-tag: <- `${image-tag}`
+      paths:
+      - <- `${moncc-volume-path}/db_data:/var/lib/postgresql/data`
+      image: postgres
+      ports:
+      - <- `0.0.0.0:${db-port}:5432`
+
+airflow-webserver:
+  defines: runnable
+  inherits: ./airflow-common
+  containers:
+    monk-airflow-webserver:
+      user: "50000:0"
+      image: apache/airflow
+      bash: airflow webserver
+      ports:
+        - <- `0.0.0.0:${webserver_port}:8080`
+      paths:
+        - <- `${volume_local}/dags:/opt/airflow/dags`
+        - <- `${volume_local}/logs:/opt/airflow/logs`
+        - <- `${volume_local}/plugins:/opt/airflow/plugins`
+  check:
+    readiness:
+      code: ["curl", "--fail", "http://localhost:8080/health"]
+      period: 10
+      initialDelay: 10
+      interval: 5
+  
+
+airflow-scheduler:
+  defines: runnable
+  inherits: ./airflow-common
+  containers:
+    monk-airflow-scheduler:
+      user: "50000:0"
+      image: apache/airflow
+      bash: airflow scheduler
+      paths:
+        - <- `${volume_local}/dags:/opt/airflow/dags`
+        - <- `${volume_local}/logs:/opt/airflow/logs`
+        - <- `${volume_local}/plugins:/opt/airflow/plugins`
+  check:
+    readiness:
+      code: ['airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
+      period: 10
+      initialDelay: 10
+      interval: 5
+
+airflow-worker:
+  defines: runnable
+  inherits: ./airflow-common
+  variables:
+    monk_dumb_init:
+      env: DUMB_INIT_SETSID
+      type: string
+      value: 0
+    monk_celery_broker_url:
+      env: CELERY_BROKER_URL
+      type: string
+      value: <- `${airflow_celery_broker_url}`
+  containers:
+    monk-airflow-worker:
+      user: "50000:0"
+      image: apache/airflow
+      bash: celery worker
+      paths:
+        - <- `${volume_local}/dags:/opt/airflow/dags`
+        - <- `${volume_local}/logs:/opt/airflow/logs`
+        - <- `${volume_local}/plugins:/opt/airflow/plugins`
+  check:
+    readiness:
+      code: ['celery --app airflow.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"']
+      period: 10
+      initialDelay: 10
+      interval: 5
+
+
+airflow-triggerer:
+  defines: runnable
+  inherits: ./airflow-common
+  containers:
+    monk-airflow-triggerer:
+      user: "50000:0"
+      image: apache/airflow
+      bash: airflow triggerer
+      paths:
+        - <- `${volume_local}/dags:/opt/airflow/dags`
+        - <- `${volume_local}/logs:/opt/airflow/logs`
+        - <- `${volume_local}/plugins:/opt/airflow/plugins`
+  check:
+    readiness:
+      code: ['airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
+      period: 10
+      initialDelay: 10
+      interval: 5
+
+airflow-init:
+  defines: runnable
+  inherits: ./airflow-common
+  variables:
+    airflow_db_updare:
+      env: _AIRFLOW_DB_UPGRADE
+      type: string
+      value: true
+    airflow_www_user_create:
+      env: _AIRFLOW_WWW_USER_CREATE
+      type: string
+      value: true
+    airflow_www_user_username:
+      env: _AIRFLOW_WWW_USER_USERNAME
+      type: string
+      value: <- `${airflow_username}`
+    airflow_www_user_password:
+      env: _AIRFLOW_WWW_USER_PASSWORD
+      type: string
+      value: <- `${airflow_password}`
+    airflow_pip_additional_requirements:
+      env: _PIP_ADDITIONAL_REQUIREMENTS
+      type: string
+      value: ''
+  containers:
+    monk-airflow-init:
+      user: "0:0"
+      image: apache/airflow
+      bash: /opt/airflow/init.sh
+      paths:
+        - <- `${volume_local}/dags:/opt/airflow/dags`
+        - <- `${volume_local}/logs:/opt/airflow/logs`
+        - <- `${volume_local}/plugins:/opt/airflow/plugins`
+  files:
+    airflow_init_script:
+      container: monk-airflow-init
+      mode: 0755
+      path: /opt/airflow/init.sh
+      contents: <<< init.sh
