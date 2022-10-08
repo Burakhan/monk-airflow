@@ -2,6 +2,13 @@ namespace: monk-airflow
 
 
 airflow-common:
+  metadata:
+    defines: metadata
+    name: Apache Airflow 
+    description: Platform created by the community to programmatically author, schedule and monitor workflows.
+    website: https://airflow.apache.org
+    publisher: monk.io
+    icon: https://airflow.apache.org/favicons/android-icon-192x192.png
   variables:
     database_host:
       type: string
